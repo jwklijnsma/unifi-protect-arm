@@ -1,4 +1,4 @@
-name: Download UNVR Releases and Build Docker Images
+name: Build UNVR Docker Images from Releases
 
 on:
   workflow_dispatch:
@@ -22,45 +22,22 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y jq curl tar
+        run: sudo apt-get update && sudo apt-get install -y jq curl
 
-      - name: Fetch release tags and download assets
-        id: fetch_releases
+      - name: Collect all release tags
+        id: set-matrix
         run: |
           API_URL="https://api.github.com/repos/$UPSTREAM_REPO/releases"
           mapfile -t TAGS < <(curl -s "$API_URL" | jq -r '.[].tag_name')
 
-          mkdir -p releases
-          for TAG in "${TAGS[@]}"; do
-            echo "Processing release: $TAG"
-            ASSETS=$(curl -s "$API_URL/tags/$TAG" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url')
-            mkdir -p "releases/$TAG"
-            for ASSET_URL in $ASSETS; do
-              FILE_NAME="releases/$TAG/$(basename $ASSET_URL)"
-              echo "Downloading $FILE_NAME..."
-              curl -L -o "$FILE_NAME" "$ASSET_URL"
-              echo "Extracting $FILE_NAME..."
-              tar -xzf "$FILE_NAME" -C "releases/$TAG"
-              rm "$FILE_NAME"
-            done
+          # Build matrix JSON
+          json_tags="["
+          for tag in "${TAGS[@]}"; do
+            json_tags+=$(jq -Rn --arg t "$tag" '$t')
+            json_tags+=","
           done
-
-      - name: Collect release directories for matrix
-        id: set-matrix
-        run: |
-          dirs=($(ls -1d releases/*/))
-          if [ ${#dirs[@]} -eq 0 ]; then
-            echo "No releases found!"
-            exit 1
-          fi
-
-          json_dirs="["
-          for dir in "${dirs[@]}"; do
-            json_dirs+=$(jq -Rn --arg t "$dir" '$t')
-            json_dirs+=","
-          done
-          json_dirs="${json_dirs%,}]"
-          matrix="{\"release\":$json_dirs}"
+          json_tags="${json_tags%,}]"
+          matrix="{\"tag\":$json_tags}"
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
           echo "Matrix JSON: $matrix"
 
@@ -103,15 +80,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: type=raw,value=${{ matrix.release }}
+          tags: type=raw,value=${{ matrix.tag }}
 
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.release }}
-          file: ${{ matrix.release }}/Dockerfile
+          context: .
+          file: Dockerfile
           platforms: linux/arm64
+          build-args: |
+            RELEASE_VERSION=${{ matrix.tag }}
+            PROTECT_STABLE=1
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
