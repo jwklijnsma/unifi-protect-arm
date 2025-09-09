@@ -1,0 +1,118 @@
+name: Download UNVR Releases and Build Docker Images
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '25 4 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  UPSTREAM_REPO: dciancu/unifi-protect-unvr-docker-arm64
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq curl tar
+
+      - name: Fetch release tags and download assets
+        id: fetch_releases
+        run: |
+          API_URL="https://api.github.com/repos/$UPSTREAM_REPO/releases"
+          mapfile -t TAGS < <(curl -s "$API_URL" | jq -r '.[].tag_name')
+
+          mkdir -p releases
+          for TAG in "${TAGS[@]}"; do
+            echo "Processing release: $TAG"
+            ASSETS=$(curl -s "$API_URL/tags/$TAG" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url')
+            for ASSET_URL in $ASSETS; do
+              FILE_NAME="releases/$(basename $ASSET_URL)"
+              curl -L -o "$FILE_NAME" "$ASSET_URL"
+              tar -xzf "$FILE_NAME" -C releases/
+              rm "$FILE_NAME"
+            done
+          done
+
+      - name: Collect release directories for matrix
+        id: set-matrix
+        run: |
+          dirs=($(ls -1d releases/*/))
+          json_dirs="["
+          for dir in "${dirs[@]}"; do
+            json_dirs+=$(jq -Rn --arg t "$dir" '$t')
+            json_dirs+=","
+          done
+          json_dirs="${json_dirs%,}]"
+          matrix="{\"release\":$json_dirs}"
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "Matrix JSON: $matrix"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: type=raw,value=${{ matrix.release }}
+
+      - name: Build and push Docker image
+        id: build-and-push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.release }}
+          file: ${{ matrix.release }}/Dockerfile
+          platforms: linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sign the Docker image
+        if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
