@@ -34,10 +34,13 @@ jobs:
           for TAG in "${TAGS[@]}"; do
             echo "Processing release: $TAG"
             ASSETS=$(curl -s "$API_URL/tags/$TAG" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) | .browser_download_url')
+            mkdir -p "releases/$TAG"
             for ASSET_URL in $ASSETS; do
-              FILE_NAME="releases/$(basename $ASSET_URL)"
+              FILE_NAME="releases/$TAG/$(basename $ASSET_URL)"
+              echo "Downloading $FILE_NAME..."
               curl -L -o "$FILE_NAME" "$ASSET_URL"
-              tar -xzf "$FILE_NAME" -C releases/
+              echo "Extracting $FILE_NAME..."
+              tar -xzf "$FILE_NAME" -C "releases/$TAG"
               rm "$FILE_NAME"
             done
           done
@@ -46,6 +49,11 @@ jobs:
         id: set-matrix
         run: |
           dirs=($(ls -1d releases/*/))
+          if [ ${#dirs[@]} -eq 0 ]; then
+            echo "No releases found!"
+            exit 1
+          fi
+
           json_dirs="["
           for dir in "${dirs[@]}"; do
             json_dirs+=$(jq -Rn --arg t "$dir" '$t')
