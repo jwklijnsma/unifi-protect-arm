@@ -40,14 +40,14 @@ jobs:
       - name: Download release tarball
         id: download
         run: |
-          echo "Building for version: v5.7.0 "
-          curl -sL "https://github.com/dciancu/unifi-protect-unvr-docker-arm64/archive/refs/tags/v5.7.0.tar.gz" -o v5.7.0.tar.gz
+          echo "Building for version: v5.7.1 "
+          curl -sL "https://github.com/dciancu/unifi-protect-unvr-docker-arm64/archive/refs/tags/v5.7.0.tar.gz" -o v5.7.1.tar.gz
 
       - name: Extract tar.gz and get directory name
         id: extract
         run: |
-          tar -xzf v5.7.0.tar.gz
-          DIR_NAME=$(tar -tzf v5.7.0.tar.gz| head -1 | cut -f1 -d"/")
+          tar -xzf v5.7.1.tar.gz
+          DIR_NAME=$(tar -tzf v5.7.1.tar.gz| head -1 | cut -f1 -d"/")
           echo "DIR_NAME=$DIR_NAME" >> $GITHUB_ENV
           echo "dirname=$DIR_NAME" >> $GITHUB_OUTPUT
 
