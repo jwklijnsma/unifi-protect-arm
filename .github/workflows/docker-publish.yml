@@ -41,7 +41,7 @@ jobs:
         id: download
         run: |
           echo "Building for version: v5.8.5"
-          curl -sL "https://github.com/dciancu/unifi-protect-unvr-docker-arm64/archive/refs/tags/v5.8.5.tar.gz" -o v5.8.3.tar.gz
+          curl -sL "https://github.com/dciancu/unifi-protect-unvr-docker-arm64/archive/refs/tags/v5.8.5.tar.gz" -o v5.8.5.tar.gz
 
       - name: Extract tar.gz and get directory name
         id: extract
