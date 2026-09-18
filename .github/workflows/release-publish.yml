@@ -70,7 +70,7 @@ jobs:
     needs: release
     if: needs.release.outputs.should_build == 'true'
 
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
 
     permissions:
       contents: read
